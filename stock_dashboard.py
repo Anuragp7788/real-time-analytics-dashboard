@@ -2,29 +2,27 @@ import yfinance as yf
 import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
-import time
 from datetime import datetime
 import pytz
+from streamlit_autorefresh import st_autorefresh
 
 # ---------------- STOCK LIST ----------------
 stocks = ["AAPL", "MSFT", "GOOGL", "AMZN", "TSLA", "META", "NVDA"]
 
-# ---------------- FETCH DATA (FIXED) ----------------
+# ---------------- FETCH DATA ----------------
 def fetch_data(ticker, period):
     try:
         data = yf.download(
             ticker,
             period=period,
-            interval="1d",   # IMPORTANT FIX
+            interval="1d",
             progress=False
         )
 
         if data is None or data.empty:
             return None
 
-        # CLEAN DATA
-        data = data.dropna()
-        data = data.reset_index()
+        data = data.dropna().reset_index()
 
         # Ensure Date column
         if "Date" not in data.columns:
@@ -35,7 +33,7 @@ def fetch_data(ticker, period):
         return data
 
     except Exception as e:
-        st.error(f"Error: {e}")
+        st.error(f"Error fetching data: {e}")
         return None
 
 
@@ -70,12 +68,18 @@ refresh_rate = st.sidebar.slider("Auto Refresh (seconds)", 5, 60, 10)
 
 st.caption(f"Auto-refresh every {refresh_rate} seconds")
 
+# ---------------- AUTO REFRESH (SAFE) ----------------
+st_autorefresh(interval=refresh_rate * 1000, key="datarefresh")
+
 # ---------------- MAIN ----------------
 data = fetch_data(ticker, period)
 
 if data is None:
     st.error("No data available")
 else:
+    # DEBUG (optional remove later)
+    st.write("Rows:", len(data))
+
     # KPIs
     close = data["Close"].astype(float)
 
@@ -89,7 +93,7 @@ else:
     col1.metric(f"{ticker} Price", f"{last:.2f} USD", f"{change:.2f} ({pct:.2f}%)")
     col2.markdown(f"### {market_status()}")
 
-    # -------- LINE CHART --------
+    # ---------------- LINE CHART ----------------
     st.subheader("📈 Line Chart")
 
     fig_line = go.Figure()
@@ -105,7 +109,7 @@ else:
 
     st.plotly_chart(fig_line, use_container_width=True)
 
-    # -------- CANDLESTICK --------
+    # ---------------- CANDLESTICK ----------------
     st.subheader("🕯️ Candlestick Chart")
 
     fig_candle = go.Figure()
@@ -125,8 +129,3 @@ else:
     # Data table
     st.subheader("Recent Data")
     st.dataframe(data.tail())
-
-
-# ---------------- AUTO REFRESH ----------------
-time.sleep(refresh_rate)
-st.rerun()
