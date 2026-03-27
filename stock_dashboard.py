@@ -12,45 +12,20 @@ stocks = ["AAPL", "MSFT", "GOOGL", "AMZN", "TSLA", "META", "NVDA"]
 # ---------------- FETCH DATA ----------------
 def fetch_data(ticker, period):
     try:
-        data = yf.download(ticker, period=period, auto_adjust=True)
+        data = yf.download(ticker, period=period, progress=False)
 
         if data is None or data.empty:
             return None
 
         data.reset_index(inplace=True)
 
-        # FIX column issue (important for chart)
+        # Ensure Date column exists
         if 'Date' not in data.columns:
             data.rename(columns={data.columns[0]: 'Date'}, inplace=True)
 
         return data
-    except Exception as e:
-        st.error(f"Error fetching data: {e}")
+    except:
         return None
-
-# ---------------- INDICATORS ----------------
-def add_indicators(data):
-    close = data["Close"]
-
-    if isinstance(close, pd.DataFrame):
-        close = close.squeeze()
-
-    data["SMA20"] = close.rolling(20).mean()
-    data["EMA20"] = close.ewm(span=20).mean()
-
-    return data
-
-# ---------------- METRICS ----------------
-def calculate_metrics(data):
-    close = data["Close"].dropna()
-
-    last = float(close.iloc[-1])
-    first = float(close.iloc[0])
-
-    change = last - first
-    pct = (change / first) * 100
-
-    return last, change, pct
 
 # ---------------- MARKET STATUS ----------------
 def market_status():
@@ -62,8 +37,7 @@ def market_status():
 
     if now.weekday() >= 5:
         return "🔴 Market Closed (Weekend)"
-
-    if open_time <= now <= close_time:
+    elif open_time <= now <= close_time:
         return "🟢 Market Open"
     else:
         return "🔴 Market Closed"
@@ -89,46 +63,50 @@ data = fetch_data(ticker, period)
 if data is None:
     st.error("No data available")
 else:
-    data = add_indicators(data)
+    # Clean data
+    data = data.dropna()
 
-    last, change, pct = calculate_metrics(data)
+    # KPIs
+    close = data["Close"]
+    last = float(close.iloc[-1])
+    first = float(close.iloc[0])
+    change = last - first
+    pct = (change / first) * 100
 
-    # KPI + Market Status
     col1, col2 = st.columns(2)
-
     col1.metric(f"{ticker} Price", f"{last:.2f} USD", f"{change:.2f} ({pct:.2f}%)")
     col2.markdown(f"### {market_status()}")
 
-    # ---------------- CHART FIXED ----------------
-    fig = go.Figure()
+    # ---------------- LINE CHART ----------------
+    st.subheader("📈 Line Chart")
 
-    fig.add_trace(go.Scatter(
+    fig_line = go.Figure()
+
+    fig_line.add_trace(go.Scatter(
         x=data["Date"],
         y=data["Close"],
         name="Price",
-        line=dict(width=2)
+        mode="lines"
     ))
 
-    fig.add_trace(go.Scatter(
+    fig_line.update_layout(height=400)
+
+    st.plotly_chart(fig_line, use_container_width=True)
+
+    # ---------------- CANDLESTICK ----------------
+    st.subheader("🕯️ Candlestick Chart")
+
+    fig_candle = go.Figure(data=[go.Candlestick(
         x=data["Date"],
-        y=data["SMA20"],
-        name="SMA20"
-    ))
+        open=data["Open"],
+        high=data["High"],
+        low=data["Low"],
+        close=data["Close"]
+    )])
 
-    fig.add_trace(go.Scatter(
-        x=data["Date"],
-        y=data["EMA20"],
-        name="EMA20"
-    ))
+    fig_candle.update_layout(height=500)
 
-    fig.update_layout(
-        title=f"{ticker} Price Trend",
-        xaxis_title="Date",
-        yaxis_title="Price",
-        height=500
-    )
-
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig_candle, use_container_width=True)
 
     # Data table
     st.subheader("Recent Data")
