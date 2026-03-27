@@ -9,31 +9,34 @@ from streamlit_autorefresh import st_autorefresh
 # ---------------- STOCK LIST ----------------
 stocks = ["AAPL", "MSFT", "GOOGL", "AMZN", "TSLA", "META", "NVDA"]
 
-# ---------------- FETCH DATA ----------------
-def fetch_data(ticker, period):
+# ---------------- FETCH DATA (FINAL FIX) ----------------
+def fetch_data(ticker):
     try:
-        data = yf.download(
-            ticker,
-            period=period,
-            interval="1d",
-            progress=False
-        )
+        ticker_obj = yf.Ticker(ticker)
+        data = ticker_obj.history(period="6mo")   # STABLE METHOD
 
-        if data is None or data.empty:
+        if data.empty:
             return None
 
-        data = data.dropna().reset_index()
+        data = data.reset_index()
 
-        # Ensure Date column
+        # Rename if needed
         if "Date" not in data.columns:
-            data.rename(columns={data.columns[0]: "Date"}, inplace=True)
+            data.rename(columns={"Datetime": "Date"}, inplace=True)
 
         data["Date"] = pd.to_datetime(data["Date"])
+
+        # Ensure numeric
+        cols = ["Open", "High", "Low", "Close"]
+        for col in cols:
+            data[col] = pd.to_numeric(data[col], errors='coerce')
+
+        data = data.dropna()
 
         return data
 
     except Exception as e:
-        st.error(f"Error fetching data: {e}")
+        st.error(f"Fetch error: {e}")
         return None
 
 
@@ -57,75 +60,65 @@ def market_status():
 st.set_page_config(layout="wide")
 
 st.title("📊 Real-Time Analytics Dashboard")
-st.subheader("Time-Series Data Visualization")
 
-# Sidebar
-st.sidebar.header("Settings")
+ticker = st.selectbox("Select Asset", stocks)
 
-ticker = st.sidebar.selectbox("Select Asset", stocks)
-period = st.sidebar.selectbox("Time Range", ["1mo", "3mo", "6mo", "1y"])
-refresh_rate = st.sidebar.slider("Auto Refresh (seconds)", 5, 60, 10)
+refresh_rate = st.slider("Auto Refresh (seconds)", 5, 60, 10)
 
-st.caption(f"Auto-refresh every {refresh_rate} seconds")
+st.caption(f"Auto-refresh every {refresh_rate} sec")
 
-# ---------------- AUTO REFRESH (SAFE) ----------------
-st_autorefresh(interval=refresh_rate * 1000, key="datarefresh")
+# SAFE AUTO REFRESH
+st_autorefresh(interval=refresh_rate * 1000, key="refresh")
 
 # ---------------- MAIN ----------------
-data = fetch_data(ticker, period)
+data = fetch_data(ticker)
 
-if data is None:
-    st.error("No data available")
+if data is None or len(data) < 10:
+    st.error("❌ Data not loading from API (try again)")
 else:
-    # DEBUG (optional remove later)
+    st.success("✅ Data Loaded Successfully")
+
+    # DEBUG
     st.write("Rows:", len(data))
 
     # KPIs
-    close = data["Close"].astype(float)
-
-    last = float(close.iloc[-1])
-    first = float(close.iloc[0])
+    last = float(data["Close"].iloc[-1])
+    first = float(data["Close"].iloc[0])
 
     change = last - first
     pct = (change / first) * 100
 
     col1, col2 = st.columns(2)
-    col1.metric(f"{ticker} Price", f"{last:.2f} USD", f"{change:.2f} ({pct:.2f}%)")
+    col1.metric(f"{ticker} Price", f"{last:.2f}", f"{change:.2f} ({pct:.2f}%)")
     col2.markdown(f"### {market_status()}")
 
     # ---------------- LINE CHART ----------------
     st.subheader("📈 Line Chart")
 
-    fig_line = go.Figure()
+    fig1 = go.Figure()
 
-    fig_line.add_trace(go.Scatter(
+    fig1.add_trace(go.Scatter(
         x=data["Date"],
-        y=data["Close"].astype(float),
+        y=data["Close"],
         mode="lines",
         name="Price"
     ))
 
-    fig_line.update_layout(height=400)
-
-    st.plotly_chart(fig_line, use_container_width=True)
+    st.plotly_chart(fig1, use_container_width=True)
 
     # ---------------- CANDLESTICK ----------------
     st.subheader("🕯️ Candlestick Chart")
 
-    fig_candle = go.Figure()
+    fig2 = go.Figure()
 
-    fig_candle.add_trace(go.Candlestick(
+    fig2.add_trace(go.Candlestick(
         x=data["Date"],
-        open=data["Open"].astype(float),
-        high=data["High"].astype(float),
-        low=data["Low"].astype(float),
-        close=data["Close"].astype(float)
+        open=data["Open"],
+        high=data["High"],
+        low=data["Low"],
+        close=data["Close"]
     ))
 
-    fig_candle.update_layout(height=500)
+    st.plotly_chart(fig2, use_container_width=True)
 
-    st.plotly_chart(fig_candle, use_container_width=True)
-
-    # Data table
-    st.subheader("Recent Data")
     st.dataframe(data.tail())
