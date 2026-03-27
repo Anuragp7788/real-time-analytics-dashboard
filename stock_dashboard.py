@@ -9,23 +9,35 @@ import pytz
 # ---------------- STOCK LIST ----------------
 stocks = ["AAPL", "MSFT", "GOOGL", "AMZN", "TSLA", "META", "NVDA"]
 
-# ---------------- FETCH DATA ----------------
+# ---------------- FETCH DATA (FIXED) ----------------
 def fetch_data(ticker, period):
     try:
-        data = yf.download(ticker, period=period, progress=False)
+        data = yf.download(
+            ticker,
+            period=period,
+            interval="1d",   # IMPORTANT FIX
+            progress=False
+        )
 
         if data is None or data.empty:
             return None
 
-        data.reset_index(inplace=True)
+        # CLEAN DATA
+        data = data.dropna()
+        data = data.reset_index()
 
-        # Ensure Date column exists
-        if 'Date' not in data.columns:
-            data.rename(columns={data.columns[0]: 'Date'}, inplace=True)
+        # Ensure Date column
+        if "Date" not in data.columns:
+            data.rename(columns={data.columns[0]: "Date"}, inplace=True)
+
+        data["Date"] = pd.to_datetime(data["Date"])
 
         return data
-    except:
+
+    except Exception as e:
+        st.error(f"Error: {e}")
         return None
+
 
 # ---------------- MARKET STATUS ----------------
 def market_status():
@@ -41,6 +53,7 @@ def market_status():
         return "🟢 Market Open"
     else:
         return "🔴 Market Closed"
+
 
 # ---------------- UI ----------------
 st.set_page_config(layout="wide")
@@ -63,13 +76,12 @@ data = fetch_data(ticker, period)
 if data is None:
     st.error("No data available")
 else:
-    # Clean data
-    data = data.dropna()
-
     # KPIs
-    close = data["Close"]
+    close = data["Close"].astype(float)
+
     last = float(close.iloc[-1])
     first = float(close.iloc[0])
+
     change = last - first
     pct = (change / first) * 100
 
@@ -77,32 +89,34 @@ else:
     col1.metric(f"{ticker} Price", f"{last:.2f} USD", f"{change:.2f} ({pct:.2f}%)")
     col2.markdown(f"### {market_status()}")
 
-    # ---------------- LINE CHART ----------------
+    # -------- LINE CHART --------
     st.subheader("📈 Line Chart")
 
     fig_line = go.Figure()
 
     fig_line.add_trace(go.Scatter(
         x=data["Date"],
-        y=data["Close"],
-        name="Price",
-        mode="lines"
+        y=data["Close"].astype(float),
+        mode="lines",
+        name="Price"
     ))
 
     fig_line.update_layout(height=400)
 
     st.plotly_chart(fig_line, use_container_width=True)
 
-    # ---------------- CANDLESTICK ----------------
+    # -------- CANDLESTICK --------
     st.subheader("🕯️ Candlestick Chart")
 
-    fig_candle = go.Figure(data=[go.Candlestick(
+    fig_candle = go.Figure()
+
+    fig_candle.add_trace(go.Candlestick(
         x=data["Date"],
-        open=data["Open"],
-        high=data["High"],
-        low=data["Low"],
-        close=data["Close"]
-    )])
+        open=data["Open"].astype(float),
+        high=data["High"].astype(float),
+        low=data["Low"].astype(float),
+        close=data["Close"].astype(float)
+    ))
 
     fig_candle.update_layout(height=500)
 
@@ -111,6 +125,7 @@ else:
     # Data table
     st.subheader("Recent Data")
     st.dataframe(data.tail())
+
 
 # ---------------- AUTO REFRESH ----------------
 time.sleep(refresh_rate)
