@@ -1,37 +1,45 @@
 import yfinance as yf
 import streamlit as st
 import pandas as pd
-import plotly.express as px
 import plotly.graph_objects as go
+import time
 from datetime import datetime, timedelta
 
-# Fetch data
-def fetch_stock_data(ticker, period, interval):
+# ---------------- FETCH DATA ----------------
+def fetch_data(ticker, period, interval):
     try:
-        end_date = datetime.now()
-        if period == '1wk':
-            start_date = end_date - timedelta(days=7)
-        else:
-            start_date = end_date - timedelta(days=int(period[:-1]))
-
-        data = yf.download(ticker, start=start_date, end=end_date, interval=interval)
+        end = datetime.now()
+        start = end - timedelta(days=int(period[:-1]) if period[:-1].isdigit() else 30)
+        data = yf.download(ticker, start=start, end=end, interval=interval)
 
         if data.empty:
-            st.error(f"No data found for {ticker}")
             return None
 
+        data.reset_index(inplace=True)
+        data.rename(columns={'Date': 'Datetime'}, inplace=True)
         return data
-    except Exception as e:
-        st.error(f"Error fetching data: {e}")
+
+    except:
         return None
 
-# Process data
-def process_data(data):
-    data.reset_index(inplace=True)
-    data.rename(columns={'Date': 'Datetime'}, inplace=True)
+
+# ---------------- INDICATORS ----------------
+def add_indicators(data):
+    close = data['Close']
+
+    if isinstance(close, pd.DataFrame):
+        close = close.squeeze()
+
+    close = close.dropna()
+
+    data['SMA_20'] = close.rolling(20).mean()
+    data['EMA_20'] = close.ewm(span=20).mean()
+    data['MA10'] = close.rolling(10).mean()
+
     return data
 
-# Calculate metrics (FIXED)
+
+# ---------------- METRICS ----------------
 def calculate_metrics(data):
     close = data['Close']
 
@@ -40,104 +48,106 @@ def calculate_metrics(data):
 
     close = close.dropna()
 
-    last_close = float(close.iloc[-1])
-    prev_close = float(close.iloc[0])
+    last = float(close.iloc[-1])
+    first = float(close.iloc[0])
 
-    change = last_close - prev_close
-    pct_change = (change / prev_close) * 100
+    change = last - first
+    pct = (change / first) * 100
 
     high = float(data['High'].max())
     low = float(data['Low'].min())
     volume = int(data['Volume'].sum())
 
-    return last_close, change, pct_change, high, low, volume
+    return last, change, pct, high, low, volume
 
-# Indicators (NO ta library)
-def add_indicators(data):
-    close = data['Close']
 
-    if isinstance(close, pd.DataFrame):
-        close = close.squeeze()
+# ---------------- UI ----------------
+st.set_page_config(layout="wide")
 
-    data['SMA_20'] = close.rolling(20).mean()
-    data['EMA_20'] = close.ewm(span=20).mean()
-    data['MA10'] = close.rolling(10).mean()
-
-    return data
-
-# UI
-st.set_page_config(layout='wide')
-st.title('Real-Time Analytics Dashboard')
-st.subheader('Time-Series Data Analysis and Visualization')
+st.title("Real-Time Analytics Dashboard")
+st.subheader("Time-Series Data Analysis and Visualization")
 
 # Sidebar
-st.sidebar.header('Chart Parameters')
-ticker = st.sidebar.text_input('Asset', 'AAPL')
-time_period = st.sidebar.selectbox('Time Range', ['1d', '5d', '1mo', '3mo', '6mo', '1y'])
-chart_type = st.sidebar.selectbox('Chart Type', ['Candlestick', 'Line'])
+st.sidebar.header("Settings")
 
-interval_mapping = {
-    '1d': '1m',
-    '5d': '5m',
-    '1mo': '1h',
-    '3mo': '1d',
-    '6mo': '1d',
-    '1y': '1wk',
+ticker1 = st.sidebar.text_input("Primary Asset", "AAPL")
+ticker2 = st.sidebar.text_input("Compare With (Optional)", "MSFT")
+
+period = st.sidebar.selectbox("Time Range", ["1d", "5d", "1mo", "3mo", "6mo", "1y"])
+
+refresh_rate = st.sidebar.slider("Auto Refresh (seconds)", 5, 60, 10)
+
+interval_map = {
+    "1d": "1m",
+    "5d": "5m",
+    "1mo": "1h",
+    "3mo": "1d",
+    "6mo": "1d",
+    "1y": "1wk",
 }
 
-# Run app
-if st.sidebar.button('Update'):
-    data = fetch_stock_data(ticker, time_period, interval_mapping[time_period])
+st.caption(f"Auto-refreshing every {refresh_rate} seconds")
 
-    if data is not None:
-        data = process_data(data)
-        data = add_indicators(data)
+# ---------------- MAIN ----------------
+data1 = fetch_data(ticker1, period, interval_map[period])
 
-        last_close, change, pct_change, high, low, volume = calculate_metrics(data)
+if data1 is None:
+    st.error("Invalid primary asset")
+else:
+    data1 = add_indicators(data1)
 
-        # Metrics
-        st.metric(f"{ticker} Price", f"{last_close:.2f} USD", f"{change:.2f} ({pct_change:.2f}%)")
+    last, change, pct, high, low, volume = calculate_metrics(data1)
 
-        col1, col2, col3 = st.columns(3)
-        col1.metric('High', f"{high:.2f}")
-        col2.metric('Low', f"{low:.2f}")
-        col3.metric('Volume', f"{volume:,}")
+    # KPIs
+    st.metric(f"{ticker1} Price", f"{last:.2f} USD", f"{change:.2f} ({pct:.2f}%)")
 
-        # Chart
-        fig = go.Figure()
+    col1, col2, col3 = st.columns(3)
+    col1.metric("High", f"{high:.2f}")
+    col2.metric("Low", f"{low:.2f}")
+    col3.metric("Volume", f"{volume:,}")
 
-        if chart_type == 'Candlestick':
-            fig.add_trace(go.Candlestick(
-                x=data['Datetime'],
-                open=data['Open'],
-                high=data['High'],
-                low=data['Low'],
-                close=data['Close']
+    # Chart
+    fig = go.Figure()
+
+    fig.add_trace(go.Scatter(
+        x=data1["Datetime"], y=data1["Close"], name=ticker1
+    ))
+
+    fig.add_trace(go.Scatter(
+        x=data1["Datetime"], y=data1["SMA_20"], name="SMA 20"
+    ))
+
+    fig.add_trace(go.Scatter(
+        x=data1["Datetime"], y=data1["EMA_20"], name="EMA 20"
+    ))
+
+    fig.add_trace(go.Scatter(
+        x=data1["Datetime"], y=data1["MA10"], name="MA 10"
+    ))
+
+    # Comparison feature
+    if ticker2:
+        data2 = fetch_data(ticker2, period, interval_map[period])
+
+        if data2 is not None:
+            fig.add_trace(go.Scatter(
+                x=data2["Datetime"], y=data2["Close"], name=ticker2
             ))
-        else:
-            fig = px.line(data, x='Datetime', y='Close')
 
-        # Indicators
-        fig.add_trace(go.Scatter(x=data['Datetime'], y=data['SMA_20'], name='SMA 20'))
-        fig.add_trace(go.Scatter(x=data['Datetime'], y=data['EMA_20'], name='EMA 20'))
-        fig.add_trace(go.Scatter(x=data['Datetime'], y=data['MA10'], name='MA 10'))
+    fig.update_layout(
+        title="Trend Analysis",
+        xaxis_title="Time",
+        yaxis_title="Value",
+        height=600
+    )
 
-        fig.update_layout(
-            title=f"{ticker} Trend Analysis",
-            xaxis_title='Time',
-            yaxis_title='Value',
-            height=600
-        )
+    st.plotly_chart(fig, use_container_width=True)
 
-        st.plotly_chart(fig, use_container_width=True)
+    # Data Table
+    st.subheader("Historical Data")
+    st.dataframe(data1[["Datetime", "Open", "High", "Low", "Close", "Volume"]])
 
-        # Tables
-        st.subheader('Historical Data')
-        st.dataframe(data[['Datetime', 'Open', 'High', 'Low', 'Close', 'Volume']])
 
-        st.subheader('Indicators')
-        st.dataframe(data[['Datetime', 'SMA_20', 'EMA_20', 'MA10']])
-
-# Sidebar info
-st.sidebar.subheader('About')
-st.sidebar.info('This dashboard analyzes time-series data and provides insights using visualization and indicators.')
+# ---------------- AUTO REFRESH ----------------
+time.sleep(refresh_rate)
+st.rerun()
