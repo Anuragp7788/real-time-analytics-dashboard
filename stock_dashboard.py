@@ -46,9 +46,16 @@ def calculate_metrics(data):
 
 # Indicators
 def add_technical_indicators(data):
-    data['SMA_20'] = ta.trend.sma_indicator(data['Close'], window=20)
-    data['EMA_20'] = ta.trend.ema_indicator(data['Close'], window=20)
-    data['RSI_14'] = ta.momentum.rsi(data['Close'], window=14)
+    close = data['Close']
+
+    # Fix for 2D issue
+    if isinstance(close, pd.DataFrame):
+        close = close.squeeze()
+
+    data['SMA_20'] = ta.trend.sma_indicator(close, window=20)
+    data['EMA_20'] = ta.trend.ema_indicator(close, window=20)
+    data['RSI_14'] = ta.momentum.rsi(close, window=14)
+
     return data
 
 # UI
